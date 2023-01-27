@@ -1,0 +1,373 @@
+---
+title: "ProjectPoposal"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(TSA)
+library(latticeExtra)
+library(uroot)
+library(tseries)
+library(forecast)
+```
+
+```{r}
+ts = read.csv('taxi-ts')
+```
+
+```{r}
+View(ts)
+```
+
+```{r}
+ts$time <- as.POSIXct(ts$time, format = '(datetime.date(%Y, %m, %d), %H)')
+```
+
+
+```{r, fig.show='hold'}
+plot(y = ts$duration, x = ts$time, type = 'o', ylab = "seconds", xlab = "time", main = "Hourly Taxi Ride Duration")
+
+```
+
+One Month
+```{r, fig.show='hold'}
+ts.month <- ts[1200:1872, ]
+plot(y = ts.month$duration, x = ts.month$time, type='o')
+
+```
+
+One Week
+```{r, fig.show='hold'}
+ts.week <- ts[1200:1368, ]
+plot(y = ts.week$duration, x = ts.week$time, type='o')
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r, fig.show='hold'}
+ts.may_june <- ts[2896: 4359, ]
+plot(y = ts.may_june$duration, 
+     x=ts.may_june$time, type='o', 
+     xlab = "Time", 
+     ylab = "ride duration in seconds", 
+     main = "Taxi Cab Ride Duration")
+```
+
+
+```{r}
+model_linear = lm(ts.may_june$duration ~ ts.may_june$time)
+summary(model_linear)
+```
+
+```{r, fig.show='hold'}
+ts.week <- ts[2896: 3064, ]
+plot(y = ts.week$duration, 
+     x=ts.may_june$time, type='o', 
+     xlab = "Time", 
+     ylab = "ride duration in seconds", 
+     main = "Zoom in on one week")
+```
+
+
+```{r}
+acf(ts.may_june$duration, main="ACF plot of Duration", lag.max = 300)
+```
+
+```{r, fig.show='hold'}
+ts.may_june$day <- as.factor(weekdays(ts.may_june$time))
+ts.may_june$Hour <- as.factor(format(ts.may_june$time, format= "%H"))
+```
+
+
+```{r, fig.show='hold'}
+model_hour = lm(ts.may_june$duration ~ ts.may_june$Hour)
+summary(model_hour)
+```
+
+Look at the residuals of daily model.  There still appears to be seasonality.
+```{r}
+hour.res = resid(model_hour)
+plot(y = hour.res, x = as.vector(ts.may_june$time), 
+     type='l', 
+     ylab="residuals", 
+     main = "Hourly Model Residuals", 
+     xlab = "Hour")
+#points(y=hour.res, x= as.vector(ts.may_june$time),  
+#       pch = as.vector(ts.may_june$day))
+abline(h=0,lty=2)
+```
+
+
+```{r, fig.show='hold'}
+model_hour_day = lm(hour.res ~ ts.may_june$day)
+summary(model_hour_day)
+
+acf(hour.res, main="Residuals of Hourly Seasonal Means")
+```
+
+```{r}
+hour_day.res = resid(model_hour_day)
+plot(y = hour_day.res, x = as.vector(ts.may_june$time), 
+     type='l', 
+     ylab="residuals", 
+     main = "Hourly Model Residuals", 
+     xlab = "Hour")
+#points(y=hour_day.res, x= as.vector(ts.may_june$time),  
+#       pch = as.vector(ts.may_june$day))
+abline(h=0,lty=2)
+```
+
+```{r}
+modelDayHour = lm(ts.may_june$duration ~ ts.may_june$Hour * ts.may_june$day)
+summary(modelDayHour)
+```
+
+```{r}
+#Forecasting
+data.ts <- as.ts(ts.may_june$duration,freq = 168)
+arma11s_xreg=Arima(data.ts,order=c(1,0,1),include.mean=F,xreg=model.matrix(modelDayHour))
+```
+
+```{r}
+# forecast the week
+newdata1=data.frame(hour=as.factor(ts.may_june$hour[-72:-1]))
+```
+
+```{r}
+modelDayHour.res = resid(modelDayHour)
+sarma101_101 = Arima(ts(modelDayHour.res, freq=168), order=c(1,0,1), include.mean = F, seasonal=list(order=c(1,0,1)))
+summary(sarma101_101)
+```
+
+```{r}
+predxreg = predict(modelDayHour, newdata1)
+predxreg = predxreg[1:72]
+predx = predict(sarma101_100, n.ahead=72)
+pr = predx$pred+predxreg
+uci = pr+2*predx$se
+lci = pr-2*predx$se
+```
+
+```{}
+
+```
+
+```{r}
+t_min = 2896
+t_max=4359
+t_total = t_max - t_min
+pr = ts(pr, start=t_total-72, end=t_total)
+uci = ts(uci, start=t_total-72, end=t_total)
+lci = ts(lci, start=t_total-72, end=t_total)
+
+ymin=min(c(as.vector(lci),ts.may_june$duration))-.1
+ymax=max(c(as.vector(uci),ts.may_june$duration))+.1
+
+plot(ts.may_june$duration,
+     xlim=c(t_total-241,t_total),
+     ylim=c(ymin,ymax),
+     ylab = "duration",
+     xlab = "time",
+     main="Three Day Prediction", type='o')
+lines(pr,col=2)
+lines(uci,col=3)
+lines(lci,col=3)
+```
+
+```{r}
+par(mfrow=c(1,2))
+hour_day_2_res = resid(model_hour_day_2)
+acf(hour_day_2_res, lag.max = 300, main = 'ACF of Seasonal Means Model Residuals')
+pacf(hour_day_2_res, lag.max = 300, main = 'PACF of Seasonal Means Model Residuals')
+```
+
+```{r}
+pacf(hour_day_2_res, lag.max = 300, main = 'PACF of Seasonal Means Model Residuals')
+```
+
+
+```{r}
+adf.test(hour_day_2_res)
+pp.test(hour_day_2_res)
+kpss.test(hour_day_2_res)
+```
+
+
+```{r}
+acf(diff(hour_day_2_res), main="ACF of differenced Residuals")
+```
+
+```{r}
+auto.arima(ts(hour_day_2_res,freq=168),d=0)
+print(ts(hour_day_2_res,freq=168))
+```
+
+```{r}
+plot(hour_day_2_res, type='o')
+abline(h=0,lty=2)
+```
+
+```{r}
+
+```
+
+
+```{r}
+acf(diff(hour_day_2_res), lag.max = 300)
+pacf(diff(hour_day_2_res), lag.max = 300)
+```
+
+
+```{r}
+subsets = armasubsets(y=modelDayHour.res,nar=10,nma=10,y.name='test',ar.method='ols')
+plot(subsets)
+```
+
+First row
+```{r}
+arma33 = Arima(y=modelDayHour.res, order=c(3,0,3))
+summary(arma33)
+```
+
+Second Row
+```{r}
+arima22 = Arima(y=modelDayHour.res, order=c(2,0,2))
+summary(arima22)
+```
+
+third
+```{r}
+arima36 = Arima(y=modelDayHour.res, order=c(3,0,6))
+summary(arima36)
+```
+
+fourth
+```{r}
+arma63 = Arima(y=modelDayHour.res, order=c(6,0,3))
+summary(arma63)
+```
+
+Fifth row down
+```{r}
+arma11 = Arima(y=modelDayHour.res, order=c(1,0,1))
+summary(arma11)
+```
+
+```{r}
+arima111 = Arima(y=ts(hour_day_2_res,freq=168), order=c(1,0,1), seasonal = list(order=c(1,0,0)))
+```
+
+
+```{r}
+#View(hour_day.res)
+library(TSA)
+any(is.na(hour_day.res))
+runs(na.omit(hour_day.res))
+```
+
+```{r}
+acf(hour_day.res, main="Hour and day seasonal models residuals")
+pacf(hour_day.res, main="Hour and day seasonal models residuals")
+eacf(hour_day.res)
+```
+
+Fast Fourier Transform Model
+```{r}
+model_fft = fft(ts.may_june$duration)
+model_fft.res = resid(model_fft)
+```
+
+```{r}
+auto.arima(hour_day.res)
+```
+
+
+```{r}
+har1 = harmonic(ts(ts.may_june$duration,freq=24))
+har2 = harmonic(ts(ts.may_june$duration,freq=168))
+cos_model = lm(ts.may_june$duration~har1*har2)
+
+summary(cos_model)
+
+cos_res = rstandard(cos_model)
+acf(cos_res, lag.max = 300, main="ACF for Residuals of cosine trend model")
+pacf(cos_res, lag.max = 300, main="ACF for Residuals of cosine trend model")
+
+
+```
+
+
+```{r}
+x = cos_res
+function (x, k = 0) 
+{
+    pruns <- function(r, n1, n2) {
+        r = 889
+        n1 = 820
+        n2 = 644
+        r1 <- r
+        l1 <- 2
+        if (n1 == n2) 
+            l2 <- 2 * n1
+        if (n1 != n2) 
+            l2 <- 2 * min(n1, n2) + 1
+        f <- seq(2, l2, 2)
+        g1 <- seq(3, l2, 2)
+        g2 <- g1
+        pdf <- 0 * (1:l2)
+        f[1] <- 2
+        g1[1] <- n1 - 1
+        g2[1] <- n2 - 1
+        pdf[2] <- f[1]
+        pdf[3] <- g1[1] + g2[1]
+        if (l2 > 4) {
+          i = 4
+            for (i in seq(4, l2, 2)) {
+                r <- (i - 2)/2
+                f[r + 1] <- (n1 - r) * (n2 - r)/r/r * f[r]
+                pdf[i] <- f[r + 1]
+            }
+        }
+        if (l2 > 5) {
+            for (i in seq(5, l2, 2)) {
+                r <- (i - 3)/2
+                g1[r + 1] <- (n1 - r - 1) * (n2 - r)/(r + 1)/r * 
+                  g1[r]
+                g2[r + 1] <- (n2 - r - 1) * (n1 - r)/(r + 1)/r * 
+                  g2[r]
+                pdf[i] <- g1[r + 1] + g2[r + 1]
+            }
+        }
+        pdf <- pdf/sum(pdf)
+        mu <- 1 + 2 * n1 * n2/(n1 + n2)
+        if (r1 <= mu) 
+            pvalue <- sum(pdf[(1:l2) <= r1])
+        if (r1 > mu) 
+            pvalue <- sum(pdf[(1:l2) >= r1])
+        if (pvalue > 0.5) 
+            pvalue <- 1 - pvalue
+        pvalue <- 2 * pvalue
+        list(expected = mu, pvalue = signif(pvalue, 3))
+    }
+    k=0
+    y <- 1 * (x <= k)
+    n1 <- sum(y)
+    n2 <- length(y) - n1
+    if (n1 * n2 == 0) 
+        return(list(pvalue = -1, expected.runs = 1 + 2 * n1 * 
+            n2/(n1 + n2), n1 = n1, n2 = n2, k = k))
+    r <- 1
+    s <- y[1]
+    for (i in 2:length(y)) {
+        if (y[i] == s) 
+            next
+        r <- r + 1
+        s <- y[i]
+    }
+    res <- pruns(r, n1, n2)
+    list(pvalue = res$pvalue, observed.runs = r, expected.runs = res$expected, 
+        n1 = n1, n2 = n2, k = k)
+}
+
+```
